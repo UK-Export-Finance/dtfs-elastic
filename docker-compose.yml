@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.16.2
+    container_name: dtfs-elasticsearch
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - ./config/elasticsearch/elasticsearch.config.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro,z
+      - elasticsearch:/usr/share/elasticsearch/data:z
+    environment:
+      ES_JAVA_OPTS: "-Xmx256m -Xms256m"
+      ELASTIC_PASSWORD: ${ELASTICSEARCH_PASSWORD}
+      discovery.type: single-node
+    networks:
+      - dtfs-elk-network
+    healthcheck:
+      interval: 20s
+      retries: 10
+      test: curl -s http://localhost:9200/_cluster/health | grep -vq '"status":"red"'
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.16.2
+    container_name: dtfs-kibana
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    ports: 
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_USER: ${ELASTICSEARCH_USER}
+      ELASTICSEARCH_PASSWORD: ${ELASTICSEARCH_PASSWORD}
+    volumes:
+      - ./config/kibana/kibana.config.yml:/usr/share/kibana/config/kibana.yml:ro,z
+    networks: 
+      - dtfs-elk-network
+
+  apm-server:
+    image: docker.elastic.co/apm/apm-server:7.16.2
+    container_name: dtfs-apm-server
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    ports:
+      - '8200:8200'
+    environment:
+      ELASTICSEARCH_USER: ${ELASTICSEARCH_USER}
+      ELASTICSEARCH_PASSWORD: ${ELASTICSEARCH_PASSWORD}
+    command: --strict.perms=false
+    volumes:
+      - type: bind
+        source: ./config/apm/apm.config.yml
+        target: /usr/share/apm-server/apm-server.yml
+        read_only: true
+    networks: 
+      - dtfs-elk-network
+
+networks:
+  dtfs-elk-network:
+    driver: bridge
+
+volumes:
+  elasticsearch:
+    driver: local
