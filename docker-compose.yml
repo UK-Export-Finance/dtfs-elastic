@@ -36,6 +36,10 @@ services:
       - ./config/kibana/kibana.config.yml:/usr/share/kibana/config/kibana.yml:ro,z
     networks: 
       - dtfs-elk-network
+    healthcheck:
+      interval: 10s
+      retries: 20
+      test: curl --write-out 'HTTP %{http_code}' --fail --silent --output /dev/null http://localhost:5601/api/status
 
   apm-server:
     image: docker.elastic.co/apm/apm-server:7.16.2
@@ -50,11 +54,49 @@ services:
       ELASTICSEARCH_PASSWORD: ${ELASTICSEARCH_PASSWORD}
     command: --strict.perms=false
     volumes:
-      - type: bind
-        source: ./config/apm/apm.config.yml
-        target: /usr/share/apm-server/apm-server.yml
-        read_only: true
+      -  ./config/apm/apm.config.yml:/usr/share/apm-server/apm-server.yml:ro,z
     networks: 
+      - dtfs-elk-network
+  
+  heartbeat:
+    image: docker.elastic.co/beats/heartbeat:7.16.2
+    container_name: dtfs-heartbeat
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    command: heartbeat -e -strict.perms=false
+    environment:
+      setup.kibana.host: kibana:5601
+      output.elasticsearch.hosts: '["http://elasticsearch:9200"]'
+      ELASTICSEARCH_USER: ${ELASTICSEARCH_USER}
+      ELASTICSEARCH_PASSWORD: ${ELASTICSEARCH_PASSWORD}
+    volumes:
+      - ./config/heartbeat/heartbeat.config.yml:/usr/share/heartbeat/heartbeat.yml:ro,z
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - dtfs-elk-network
+  
+  metricbeat:
+    image: docker.elastic.co/beats/metricbeat:7.16.2
+    container_name: dtfs-metricbeat
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    user: root
+    command:
+      - -e # Log to stderr
+      - --strict.perms=false
+      - --system.hostfs=/hostfs
+    volumes:
+      - ./config/metricbeat/metricbeat.config.yml:/usr/share/metricbeat/metricbeat.yml:ro,z
+      - /proc:/hostfs/proc:ro
+      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+      - /:/hostfs:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      ELASTICSEARCH_USER: ${ELASTICSEARCH_USER}
+      ELASTICSEARCH_PASSWORD: ${ELASTICSEARCH_PASSWORD}
+    networks:
       - dtfs-elk-network
 
 networks:
